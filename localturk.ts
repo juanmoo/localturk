@@ -8,70 +8,82 @@
  *   localturk [--options] template.html tasks.csv outputs.csv
  */
 
-import * as bodyParser from 'body-parser';
-import * as errorhandler from 'errorhandler';
-import * as express from 'express';
-import * as fs from 'fs-extra';
-import * as path from 'path';
-import * as program from 'commander';
-import open = require('open');
-import Reservoir = require('reservoir');
-import * as _ from 'lodash';
+import * as bodyParser from "body-parser";
+import * as errorhandler from "errorhandler";
+import * as express from "express";
+import * as fs from "fs-extra";
+import * as path from "path";
+import * as program from "commander";
+import open = require("open");
+import Reservoir = require("reservoir");
+import * as _ from "lodash";
 
-import * as csv from './csv';
-import {makeTemplate} from './sample-template';
-import * as utils from './utils';
-import { outputFile } from 'fs-extra';
+import * as csv from "./csv";
+import { makeTemplate } from "./sample-template";
+import * as utils from "./utils";
+import { outputFile } from "fs-extra";
 
 program
-  .version('2.1.1')
-  .usage('[options] template.html tasks.csv outputs.csv')
-  .option('-p, --port <n>', 'Run on this port (default 4321)', parseInt)
-  .option('-s, --static-dir <dir>',
-          'Serve static content from this directory. Default is same directory as template file.')
-  .option('-r, --random-order',
-          'Serve images in random order, rather than sequentially. This is useful for ' +
-          'generating valid subsamples or for minimizing collisions during group localturking.')
-  .option('-w, --write-template', 'Generate a stub template file based on the input CSV.')
+  .version("2.1.1")
+  .usage("[options] template.html tasks.csv outputs.csv")
+  .option("-p, --port <n>", "Run on this port (default 4321)", parseInt)
+  .option(
+    "-s, --static-dir <dir>",
+    "Serve static content from this directory. Default is same directory as template file."
+  )
+  .option(
+    "-r, --random-order",
+    "Serve images in random order, rather than sequentially. This is useful for " +
+      "generating valid subsamples or for minimizing collisions during group localturking."
+  )
+  .option(
+    "-w, --write-template",
+    "Generate a stub template file based on the input CSV."
+  )
   .parse(process.argv);
 
-const {args, randomOrder, writeTemplate} = program;
-if (!((3 === args.length && !writeTemplate) ||
-     (1 === args.length && writeTemplate))) {
+const { args, randomOrder, writeTemplate } = program;
+if (
+  !(
+    (3 === args.length && !writeTemplate) ||
+    (1 === args.length && writeTemplate)
+  )
+) {
   program.help();
 }
 if (writeTemplate) {
   // tasks.csv is the only input with --write-template.
-  args.unshift('');
-  args.push('');
+  args.unshift("");
+  args.push("");
 }
 
 const [templateFile, tasksFile, outputsFile] = args;
 const port = program.port || 4321;
 // --static-dir is particularly useful for classify-images, where the template file is in a
 // temporary directory but the image files could be anywhere.
-const staticDir = program['staticDir'] || path.dirname(templateFile);
+const staticDir = program["staticDir"] || path.dirname(templateFile);
 
-type Task = {[key: string]: string};
-let flash = '';  // this is used to show warnings in the web UI.
+type Task = { [key: string]: string };
+let flash = ""; // this is used to show warnings in the web UI.
 
-async function renderTemplate({task, numCompleted, numTotal}: TaskStats) {
-  const template = await fs.readFile(templateFile, {encoding: 'utf8'});
+async function renderTemplate({ task, numCompleted, numTotal }: TaskStats) {
+  const template = await fs.readFile(templateFile, { encoding: "utf8" });
   const fullDict = {};
   for (const k in task) {
     fullDict[k] = utils.htmlEntities(task[k]);
   }
   // Note: these two fields are not available in mechanical turk.
-  fullDict['ALL_JSON'] = utils.htmlEntities(JSON.stringify(task, null, 2));
-  fullDict['ALL_JSON_RAW'] = JSON.stringify(task);
+  fullDict["ALL_JSON"] = utils.htmlEntities(JSON.stringify(task, null, 2));
+  fullDict["ALL_JSON_RAW"] = JSON.stringify(task);
   const userHtml = utils.renderTemplate(template, fullDict);
 
   const thisFlash = flash;
-  flash = '';
+  flash = "";
 
-  const sourceInputs = _.map(task, (v, k) =>
-      `<input type=hidden name="${k}" value="${utils.htmlEntities(v)}">`
-    ).join('\n');
+  const sourceInputs = _.map(
+    task,
+    (v, k) => `<input type=hidden name="${k}" value="${utils.htmlEntities(v)}">`
+  ).join("\n");
 
   return utils.dedent`
     <!doctype html>
@@ -119,9 +131,10 @@ async function checkTaskOutput(task: Task) {
   // your form elements.
   const headers = await csv.readHeaders(tasksFile);
   for (const k in task) {
-    if (headers.indexOf(k) === -1) return;  // there's a new key.
+    if (headers.indexOf(k) === -1) return; // there's a new key.
   }
-  flash = 'No new keys in output. Make sure your &lt;input&gt; elements have "name" attributes';
+  flash =
+    'No new keys in output. Make sure your &lt;input&gt; elements have "name" attributes';
 }
 
 interface TaskStats {
@@ -131,14 +144,16 @@ interface TaskStats {
 }
 
 async function getNextTask(): Promise<TaskStats> {
-  const completedTasks = (await readCompletedTasks()).map(utils.normalizeValues);
+  const completedTasks = (await readCompletedTasks()).map(
+    utils.normalizeValues
+  );
   let sampler = randomOrder ? Reservoir<Task>() : null;
   let nextTask: Task;
   let numTotal = 0;
   for await (const task of csv.readRowObjects(tasksFile)) {
     numTotal++;
     if (!sampler && nextTask) {
-      continue;  // we're only counting at this point.
+      continue; // we're only counting at this point.
     }
     if (isTaskCompleted(utils.normalizeValues(task), completedTasks)) {
       continue;
@@ -155,51 +170,73 @@ async function getNextTask(): Promise<TaskStats> {
     task: sampler ? sampler[0] : nextTask,
     numCompleted: _.size(completedTasks),
     numTotal,
-  }
+  };
 }
 
 const app = express();
-app.use(bodyParser.urlencoded({extended: false}));
+app.use(bodyParser.urlencoded({ extended: false }));
 app.use(errorhandler());
 app.use(express.static(path.resolve(staticDir)));
 
-app.get('/', utils.wrapPromise(async (req, res) => {
-  const nextTask = await getNextTask();
-  if (nextTask.task) {
-    console.log(nextTask.task);
-    const html = await renderTemplate(nextTask);
-    res.send(html);
-  } else {
-    res.send('DONE');
-    process.exit(0);
-  }
-}));
+let lastTask;
 
-app.post('/submit', utils.wrapPromise(async (req, res) => {
-  const task: Task = req.body;
-  await csv.appendRow(outputsFile, task);
-  checkTaskOutput(task);  // sets the "flash" variable with any errors.
-  console.log('Saved ' + JSON.stringify(task));
-  res.redirect('/');
-}));
+app.get(
+  "/",
+  utils.wrapPromise(async (req, res) => {
+    const stay = req.query.stay;
+    let nextTask;
+    if (stay === "1") {
+      nextTask = lastTask;
+    } else {
+      nextTask = await getNextTask();
+      lastTask = nextTask;
+    }
+    if (nextTask.task) {
+      console.log(nextTask.task);
+      const html = await renderTemplate(nextTask);
+      res.send(html);
+    } else {
+      res.send("DONE");
+      process.exit(0);
+    }
+  })
+);
 
-app.post('/delete-last', utils.wrapPromise(async (req, res) => {
-  const row = await csv.deleteLastRow(outputsFile);
-  console.log('Deleting', row);
-  res.redirect('/');
-}));
+app.post(
+  "/submit",
+  utils.wrapPromise(async (req, res) => {
+    const task: Task = req.body;
+    await csv.appendRow(outputsFile, task);
+    checkTaskOutput(task); // sets the "flash" variable with any errors.
+    console.log("Saved " + JSON.stringify(task));
+    console.log(task["submit-stay"]);
+    if (task["submit-stay"] !== undefined) {
+      res.redirect("/?stay=1");
+    } else {
+      res.redirect("/");
+    }
+  })
+);
 
+app.post(
+  "/delete-last",
+  utils.wrapPromise(async (req, res) => {
+    const row = await csv.deleteLastRow(outputsFile);
+    console.log("Deleting", row);
+    res.redirect("/");
+  })
+);
 
 if (writeTemplate) {
   (async () => {
     const columns = await csv.readHeaders(tasksFile);
     console.log(makeTemplate(columns));
-  })().catch(e => {
+  })().catch((e) => {
     console.error(e);
   });
 } else {
   app.listen(port);
   const url = `http://localhost:${port}`;
-  console.log('Running local turk on', url);
+  console.log("Running local turk on", url);
   open(url);
 }
