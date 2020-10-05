@@ -22,6 +22,7 @@ import * as csv from "./csv";
 import { makeTemplate } from "./sample-template";
 import * as utils from "./utils";
 import { outputFile } from "fs-extra";
+import { print } from "util";
 
 program
   .version("2.1.1")
@@ -185,14 +186,15 @@ app.get(
   utils.wrapPromise(async (req, res) => {
     const stay = req.query.stay;
     let nextTask;
-    if (stay === "1") {
-      nextTask = lastTask;
+    if (stay === "1" && lastTask !== undefined) {
+      // Keep track of arm count
+      nextTask = {...lastTask};
+      nextTask.task.arm_number = (parseInt(nextTask.task.arm_number) + 1).toString()
     } else {
       nextTask = await getNextTask();
       lastTask = nextTask;
     }
     if (nextTask.task) {
-      console.log(nextTask.task);
       const html = await renderTemplate(nextTask);
       res.send(html);
     } else {
@@ -208,8 +210,6 @@ app.post(
     const task: Task = req.body;
     await csv.appendRow(outputsFile, task);
     checkTaskOutput(task); // sets the "flash" variable with any errors.
-    console.log("Saved " + JSON.stringify(task));
-    console.log(task["submit-stay"]);
     if (task["submit-stay"] !== undefined) {
       res.redirect("/?stay=1");
     } else {
@@ -222,7 +222,6 @@ app.post(
   "/delete-last",
   utils.wrapPromise(async (req, res) => {
     const row = await csv.deleteLastRow(outputsFile);
-    console.log("Deleting", row);
     res.redirect("/");
   })
 );
@@ -230,13 +229,11 @@ app.post(
 if (writeTemplate) {
   (async () => {
     const columns = await csv.readHeaders(tasksFile);
-    console.log(makeTemplate(columns));
   })().catch((e) => {
     console.error(e);
   });
 } else {
   app.listen(port);
   const url = `http://localhost:${port}`;
-  console.log("Running local turk on", url);
   open(url);
 }
