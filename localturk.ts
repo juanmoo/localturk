@@ -23,6 +23,7 @@ import { makeTemplate } from "./sample-template";
 import * as utils from "./utils";
 import { outputFile } from "fs-extra";
 import { print } from "util";
+import { last } from "lodash";
 
 program
   .version("2.1.1")
@@ -67,7 +68,7 @@ const staticDir = program["staticDir"] || path.dirname(templateFile);
 type Task = { [key: string]: string };
 let flash = ""; // this is used to show warnings in the web UI.
 
-async function renderTemplate({ task, numCompleted, numTotal }: TaskStats) {
+async function renderTemplate({ task, numCompleted, numTotal, prev }: TaskStats) {
   const template = await fs.readFile(templateFile, { encoding: "utf8" });
   const fullDict = {};
   for (const k in task) {
@@ -76,6 +77,7 @@ async function renderTemplate({ task, numCompleted, numTotal }: TaskStats) {
   // Note: these two fields are not available in mechanical turk.
   fullDict["ALL_JSON"] = utils.htmlEntities(JSON.stringify(task, null, 2));
   fullDict["ALL_JSON_RAW"] = JSON.stringify(task);
+  fullDict["PREV_RESPONSE"] = JSON.stringify(prev)
   const userHtml = utils.renderTemplate(template, fullDict);
 
   const thisFlash = flash;
@@ -140,6 +142,7 @@ async function checkTaskOutput(task: Task) {
 
 interface TaskStats {
   task?: Task;
+  prev?: Task | String;
   numCompleted: number;
   numTotal: number;
 }
@@ -180,6 +183,7 @@ app.use(errorhandler());
 app.use(express.static(path.resolve(staticDir)));
 
 let lastTask;
+let lastResponse: Task;
 
 app.get(
   "/",
@@ -188,13 +192,18 @@ app.get(
     let nextTask;
     if (stay === "1" && lastTask !== undefined) {
       // Keep track of arm count
-      nextTask = {...lastTask};
-      nextTask.task.arm_number = (parseInt(nextTask.task.arm_number) + 1).toString()
+      nextTask = { ...lastTask };
+      nextTask.task.arm_number = (
+        parseInt(nextTask.task.arm_number) + 1
+      ).toString();
+      // Clear all non arm-related info to new task
+      // console.log(nextTask.task);
     } else {
       nextTask = await getNextTask();
       lastTask = nextTask;
     }
     if (nextTask.task) {
+      nextTask.prev = lastResponse;
       const html = await renderTemplate(nextTask);
       res.send(html);
     } else {
@@ -208,6 +217,7 @@ app.post(
   "/submit",
   utils.wrapPromise(async (req, res) => {
     const task: Task = req.body;
+    lastResponse = { ...task };
     await csv.appendRow(outputsFile, task);
     checkTaskOutput(task); // sets the "flash" variable with any errors.
     if (task["submit-stay"] !== undefined) {
