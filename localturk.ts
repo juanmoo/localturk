@@ -68,7 +68,12 @@ const staticDir = program["staticDir"] || path.dirname(templateFile);
 type Task = { [key: string]: string };
 let flash = ""; // this is used to show warnings in the web UI.
 
-async function renderTemplate({ task, numCompleted, numTotal, prev }: TaskStats) {
+async function renderTemplate({
+  task,
+  numCompleted,
+  numTotal,
+  prev,
+}: TaskStats) {
   const template = await fs.readFile(templateFile, { encoding: "utf8" });
   const fullDict = {};
   for (const k in task) {
@@ -77,7 +82,7 @@ async function renderTemplate({ task, numCompleted, numTotal, prev }: TaskStats)
   // Note: these two fields are not available in mechanical turk.
   fullDict["ALL_JSON"] = utils.htmlEntities(JSON.stringify(task, null, 2));
   fullDict["ALL_JSON_RAW"] = JSON.stringify(task);
-  fullDict["PREV_RESPONSE"] = JSON.stringify(prev)
+  fullDict["PREV_RESPONSE"] = JSON.stringify(prev);
   const userHtml = utils.renderTemplate(template, fullDict);
 
   const thisFlash = flash;
@@ -88,12 +93,22 @@ async function renderTemplate({ task, numCompleted, numTotal, prev }: TaskStats)
     (v, k) => `<input type=hidden name="${k}" value="${utils.htmlEntities(v)}">`
   ).join("\n");
 
+  let completed = await readCompletedTasks();
+  let completedCount = 0;
+  completed.forEach((t) => {
+    if (t.arm_number !== "1") {
+      completedCount++;
+    }
+  });
+
   return utils.dedent`
     <!doctype html>
     <html>
-    <title>${numCompleted} / ${numTotal} - localturk</title>
+    <title>${numCompleted} / ${numTotal + completedCount} - localturk</title>
     <body><form action=/submit method=post>
-    <p>${numCompleted} / ${numTotal} <span style="background: yellow">${thisFlash}</span></p>
+    <p>${numCompleted} / ${
+    numTotal + completedCount
+  } <span style="background: yellow">${thisFlash}</span></p>
     ${sourceInputs}
     ${userHtml}
     <hr/><input type=submit />
