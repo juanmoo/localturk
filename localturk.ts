@@ -203,22 +203,35 @@ let lastResponse: Task;
 app.get(
   "/",
   utils.wrapPromise(async (req, res) => {
-    const stay = req.query.stay;
+    const submitType = req.query.submitType;
     let nextTask;
-    if (stay === "1" && lastTask !== undefined) {
-      // Keep track of arm count
-      nextTask = { ...lastTask };
-      nextTask.task.arm_number = (
-        parseInt(nextTask.task.arm_number) + 1
-      ).toString();
-      // Clear all non arm-related info to new task
-      // console.log(nextTask.task);
-    } else {
+
+    if (
+      (submitType !== "stay" && submitType !== "prefill") ||
+      lastTask === undefined
+    ) {
+      lastResponse = undefined;
       nextTask = await getNextTask();
       lastTask = nextTask;
+    } else {
+      if (submitType === "stay") {
+        // Keep track of arm count
+        nextTask = { ...lastTask };
+        nextTask.task.arm_number = (
+          parseInt(nextTask.task.arm_number) + 1
+        ).toString();
+        nextTask.prev = undefined;
+      } else if (submitType === "prefill") {
+        // Keep track of arm count
+        nextTask = { ...lastTask };
+        nextTask.task.arm_number = (
+          parseInt(nextTask.task.arm_number) + 1
+        ).toString();
+
+        nextTask.prev = lastResponse;
+      }
     }
     if (nextTask.task) {
-      nextTask.prev = lastResponse;
       const html = await renderTemplate(nextTask);
       res.send(html);
     } else {
@@ -236,7 +249,9 @@ app.post(
     await csv.appendRow(outputsFile, task);
     checkTaskOutput(task); // sets the "flash" variable with any errors.
     if (task["submit-stay"] !== undefined) {
-      res.redirect("/?stay=1");
+      res.redirect("/?submitType=stay");
+    } else if (task["submit-prefill"] !== undefined) {
+      res.redirect("/?submitType=prefill");
     } else {
       res.redirect("/");
     }
